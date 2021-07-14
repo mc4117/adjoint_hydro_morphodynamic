@@ -1,13 +1,15 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
-Created on Sat Jan 23 12:53:03 2021
+Tsunami Test case - Dual twin
+=======================
 
-@author: mc4117
+Uses the adjoint method to invert for uncertain parameters in the tsunami test case.
 
-Kobayashi and lawrence experiments
-considered in huang and li
+This file runs a dual-twin experiment so the `true' values in the functional come from a previous model
+run which is cleared from the pyadjoint tape.
 
+The set-up used is that from the laboratory test case in 
+
+[1] Kobayashi,  N.,  Lawrence,  A.R.,  2004.   Cross-shore  sediment  transport  under  breaking  solitarywaves.  Journal of Geophysical Research:  Oceans 109.  doi:10.1029/2003jc002084.
 """
 
 from firedrake_adjoint import *
@@ -17,18 +19,23 @@ import numpy as np
 import time
 import datetime
 
+# Note only one of the flags below should be set to True for each code-run.
+# The first two flags check that the adjoint model is working properly and the third flag runs the calibration
+
+# derivative flag - if true compute the derivative (and test that it has been calculated correctly)
 test_derivative = False
+# taylor test flag - if true conduct the taylor test (another check to check derivative calculated correctly)
 taylor_test_flag = False
+# minimization flag - run optimisation algorithm to calibrate for uncertain parameters
 minimize_flag = True
 
 
+
+# write outputs to text file
 def eval_callback(value):
     f= open("dual_amplitude_bulge_abs.txt","a")
     f.write(str([i.dat.data[:] for i in value]))
-    #f.write(' ')
-    #f.write(str(functional_value))
     f.write('\n')
-    #print(value)
     print('max')
     print(max([abs(value[i].dat.data[:] - elev_old[i].dat.data[:]) for i in range(len(value))]))
     f.close()
@@ -40,8 +47,8 @@ def eval_post(functional_value, value):
     f.close()
     print(functional_value)
 
-morfac = 1
 
+# define mesh
 lx = 30
 ly = 4
 nx = lx*5
@@ -55,14 +62,13 @@ P1_2d = FunctionSpace(mesh2d, 'DG', 1)
 # define underlying bathymetry
 bathymetry_2d = Function(V, name='Bathymetry')
 x,y = SpatialCoordinate(mesh2d)
-
 beach_profile = -x/12 + 131/120
 
 bathymetry_2d.interpolate(conditional(x<3.5, Constant(0.8), beach_profile))
-init = Function(V).interpolate(conditional(x<3.5, Constant(0.8), beach_profile))
+init = Function(V).interpolate(conditional(x<3.5, Constant(0.8), beach_profile)) # copy of bathymetry
 
+# define tsunami wave
 H = AdjFloat(0.216)
-
 h = AdjFloat(0.8)
 C = AdjFloat(3.16)
 eta_down = AdjFloat(-0.0025)
@@ -71,19 +77,22 @@ tmax = AdjFloat(3.9)
 def tsunami_elev(H, t):
     return H*(cosh(sqrt((3*H)/(4*h))*(C/h)*(t-tmax)))**(-2) + eta_down
 
-def forward(bathymetry, elev_list, bath_arr = [], annotate_flag = True):
-
+def forward(bathymetry, elev_list, bath_arr = []):
+    """
+    This function runs the forward model
+    """
     dt = 0.025
     morfac = 4
     max_angle = 22
 
     bath_list  = []
     def update_forcings(t_new):
+        # update boundary condition
         if t_old.dat.data[:] != t_new:
             new_counter[0] += 1
             elev_const.assign(elev_list[new_counter[0]])
             t_old.assign(t_new)
-
+        # record bathymetry at every timestep
         bath_arr.append(solver_obj.fields.bathymetry_2d.copy(deepcopy =True))
 
 
@@ -93,13 +102,8 @@ def forward(bathymetry, elev_list, bath_arr = [], annotate_flag = True):
     V = FunctionSpace(mesh2d, 'CG', 1)
     P1_2d = FunctionSpace(mesh2d, 'DG', 1)
 
-
     new_counter = [0]
-    counter = [0]
-    J_list = []
-
     t_old = Constant(0.0)
-    t_old2 = Constant(0.0)
 
     t_end = 20
 
@@ -131,10 +135,13 @@ def forward(bathymetry, elev_list, bath_arr = [], annotate_flag = True):
     options.quadratic_drag_coefficient = Constant(9.81/(65**2)) #chezy
     options.horizontal_viscosity = Constant(0.8)
 
+    # specify which components of sediment model are being used
     options.sediment_model_options.solve_suspended_sediment = True
-    options.sediment_model_options.use_bedload = False  # according to Tehranirad
+    options.sediment_model_options.use_bedload = False
     options.sediment_model_options.solve_exner = True
     options.sediment_model_options.use_sediment_conservative_form = True
+    
+    # set key sediment parameters
     options.sediment_model_options.average_sediment_size = Constant(1.8e-4)
     options.sediment_model_options.bed_reference_height = Constant(0.00054) #2)
     options.sediment_model_options.use_sediment_slide = True
@@ -144,7 +151,7 @@ def forward(bathymetry, elev_list, bath_arr = [], annotate_flag = True):
     options.sediment_model_options.max_angle = Constant(max_angle)
     options.sediment_model_options.morphological_acceleration_factor = Constant(morfac)
 
-
+    # set solver parameters
     options.timestepper_options.solver_parameters = {
         'ksp_type': 'gmres',
         'pc_type': 'fieldsplit',
@@ -153,10 +160,11 @@ def forward(bathymetry, elev_list, bath_arr = [], annotate_flag = True):
 
     options.timestep = dt
 
+    # set boundary conditions
     swe_bnd = {}
-
     elev_const = Constant(0.0)
     elev_const.assign(elev_list[0])
+    # apply tsunami-like wave as an input boundary condition
     swe_bnd[1] = {'elev': elev_const}
 
     solver_obj.bnd_functions['shallow_water'] = swe_bnd
@@ -164,6 +172,7 @@ def forward(bathymetry, elev_list, bath_arr = [], annotate_flag = True):
     elev_init = Function(P1_2d).interpolate(Constant(-0.0025))
     uv_init = as_vector((1e-10, 0.0))
 
+    # set initial conditions
     solver_obj.assign_initial_conditions(uv=uv_init, elev=elev_init)
 
     # run model
@@ -174,13 +183,17 @@ def forward(bathymetry, elev_list, bath_arr = [], annotate_flag = True):
 
 times = np.linspace(0, 20, 801)
 
+# use wave from [1] to generate `true' outputs in dual twin experiment
 elev_old = [Constant(tsunami_elev(H, i)) for i in times]
 
-old_bath_list = forward(bathymetry_2d, elev_old, annotate_flag = False)
+# run forward model to obtain `true' bed value for dual twin experiment
+old_bath_list = forward(bathymetry_2d, elev_old)
 
+# clear pyadjoint tape so pyadjoint forgets parameters used to obtain `true' bed value
 tape = get_working_tape()
 tape.clear_tape()
 
+# define initial guess for elevation
 elev_guess = []
 
 for i in times:
@@ -193,52 +206,58 @@ for i in times:
     else:
         elev_guess.append(Constant(tsunami_elev(H, i)))
 
+# run forward model again so pyadjoint can tape it
 new_bath_list = []
 new_bath_list = forward(init, elev_guess, new_bath_list)
 
+# calculate error between new_bath and `true' bed value
 J_new = 0
-
 for i in range(len(new_bath_list)):
     J_new += assemble(inner(new_bath_list[i]-old_bath_list[i], new_bath_list[i]-old_bath_list[i])*dx)
 
+# use a tikhonov regularisation term
 identity = Function(V).interpolate(Constant(1e-4))
 final_sum = [assemble(((elev_guess[i]*elev_guess[i])**0.5)*identity*dx) for i in range(len(elev_guess))]
 
+# assemble output functional
 J_fin = J_new + sum(final_sum)
 
-print(J_new)
-print(J_fin)
-
-H_diff = AdjFloat(0.1201)
-elev_diff = [Constant(tsunami_elev(H_diff, i)) for i in times]
+elev_diff = [Constant(i.dat.data[0]+0.00001) for i in elev_guess]
 
 if test_derivative:
-
+    # compute derivative of J with respect to uncertain parameter
+    # and also check derivative computed correctly by comparing (J_h - J_0) with dJ/dm * h. 
+    # For small enough h these should be equal
+    
+    # tell pyadjoint what the functional and uncertain parameters are
     rf = ReducedFunctional(J_fin, [Control(p) for p in elev_guess])
 
-    J_h = rf(elev_guess)
-    print(J_h)
+    # replay tape. If J_0 is not equal to J (within a reasonable tolerance) then 
+    # pyadjoint has not taped the model correctly
+    J_0 = rf(elev_guess)
+    print(J_0)
 
+    # calculate derivative
     der = rf.derivative()
-    f = open('der_init.txt', 'w+')
-    f.write(str([der[i].dat.data[:] for i in range(len(der))]))
-    f.close()
-
     der_sum = sum([der[i].dat.data[:]*(elev_diff[i].dat.data[:]-elev_guess[i].dat.data[:]) for i in range(len(der))])
 
+    # play tape with slightly peturbed parameters
+    J_h = rf(elev_diff)
+    
+    # check (J_h - J_0) = dJ/dm * h within reasonable degree of tolerance
     print(der_sum)
-
-    J_0 = rf(elev_diff)
-
-    print(J_0)
-    print(J_0 - J_h)
+    print(J_h - J_0)
 
     stop
 
 if taylor_test_flag:
+    # check that the taylor test passes
+    
+    # tell pyadjoint what the functional and uncertain parameters are    
     rf = ReducedFunctional(J_fin, [Control(p) for p in elev_guess])
+    
+    # peturbations used in taylor test
     h = [Constant(1e-7) for i in times]
-    print(h[0].dat.data[:])
     conv_rate = taylor_test(rf, elev_guess, h)
 
     if conv_rate > 1.9:
@@ -247,5 +266,7 @@ if taylor_test_flag:
         print('*** ERROR: test failed ***')
 
 if minimize_flag:
+    # tell pyadjoint what the functional and uncertain parameters are 
     rf = ReducedFunctional(J_fin, [Control(p) for p in elev_guess[40:400]], eval_cb_pre = eval_callback, eval_cb_post = eval_post)
+    # compute minimisation algorithm to invert for uncertain values
     min_value = minimize(rf, options={'gtol':  1e-200, 'ftol': 1e-10, 'maxfun': 1000})

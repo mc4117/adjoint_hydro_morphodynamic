@@ -1,3 +1,16 @@
+"""
+Migrating Trench Test case - Optimum parameter estimation
+=======================
+
+Uses the adjoint method to calibrate for uncertain parameters in the migrating trench test case.
+
+The true values in this file come from the experimental data.
+
+The forward model set-up for this test case can be found in 
+[1] Clare et al. (2020). Hydro-morphodynamics 2D modelling using a discontinuous Galerkin discretisation.
+    Computers & Geosciences, 104658. https://doi.org/10.1016/j.cageo.2020.104658
+"""
+
 from firedrake_adjoint import *
 from thetis import *
 
@@ -8,12 +21,19 @@ import matplotlib.pyplot as plt
 import time
 import datetime
 
-import adjoint_functions as adj_fns
-
 data = pd.read_csv('experimental_data.csv', header = None)
 
-sed_flag = False
+# Note only one of the flags below should be set to True for each code-run.
+# The first two flags check that the adjoint model is working properly and the third flag runs the calibration
 
+# derivative flag - if true compute the derivative (and test that it has been calculated correctly)
+test_derivative = False
+# taylor test flag - if true conduct the taylor test (another check to check derivative calculated correctly)
+taylor_test_flag = False
+# minimization flag - run optimisation algorithm to calibrate for uncertain parameters
+minimize_flag = True
+
+# create file for writing outputs
 f = open("calib_multi_ks_d50_rho_diff_1e-4.txt", "w+")
 
 def eval_callback(functional_value, value):
@@ -24,32 +44,18 @@ def eval_callback(functional_value, value):
     print([x.dat.data[:] for x in value])
     print(functional_value)
 
-lx = 16
-ly = 1.1
-nx = lx*4
-ny = 5
-mesh2d = RectangleMesh(nx, ny, lx, ly)
+def forward(bathymetry_2d, viscosity_norm, ks_norm, average_size_norm, rhos_norm, diffusivity_norm):
 
-x, y = SpatialCoordinate(mesh2d)
-
-V = FunctionSpace(mesh2d, "CG", 1)
-
-initialdepth = Constant(0.397)
-depth_riv = Constant(initialdepth - 0.397)
-depth_trench = Constant(depth_riv - 0.15)
-depth_diff = depth_trench - depth_riv
-
-trench = conditional(le(x, 5), depth_riv, conditional(le(x, 6.5), (1/1.5)*depth_diff*(x-6.5) + depth_trench,
-                         conditional(le(x, 9.5), depth_trench, conditional(le(x, 11), -(1/1.5)*depth_diff*(x-11) + depth_riv, depth_riv))))
-
-def forward(bathymetry_2d, viscosity_norm, ks_norm, average_size_norm, rhos_norm, diffusivity_norm, sed_rate = None):
-
+    """
+    This function runs the forward model
+    """
     # define function spaces
     V = FunctionSpace(mesh2d, "CG", 1)
     DG_2d = FunctionSpace(mesh2d, "DG", 1)
     vector_dg = VectorFunctionSpace(mesh2d, "DG", 1)
     R_1d = FunctionSpace(mesh2d, 'R', 0)
 
+    # re-scale uncertain parameters
     rhos = Function(R_1d).assign(rhos_norm*1000)
     average_size = Function(R_1d).assign(average_size_norm/(1e4))
     ks = Function(R_1d).assign(ks_norm/100)
@@ -83,6 +89,7 @@ def forward(bathymetry_2d, viscosity_norm, ks_norm, average_size_norm, rhos_norm
     solver_obj = solver2d.FlowSolver2d(mesh2d, bathymetry_2d)
     options = solver_obj.options
 
+    # specify which components of sediment model are being used
     options.sediment_model_options.solve_suspended_sediment = True
     options.sediment_model_options.use_bedload = True
     options.sediment_model_options.solve_exner = True
@@ -98,13 +105,13 @@ def forward(bathymetry_2d, viscosity_norm, ks_norm, average_size_norm, rhos_norm
     options.output_directory = outputdir
     options.check_volume_conservation_2d = True
 
-    options.fields_to_export = ['sediment_2d', 'uv_2d', 'elev_2d', 'bathymetry_2d']  # note exporting bathymetry must be done through export func
+    options.fields_to_export = ['sediment_2d', 'uv_2d', 'elev_2d', 'bathymetry_2d']
     options.sediment_model_options.check_sediment_conservation = True
 
     # using nikuradse friction
     options.nikuradse_bed_roughness = Function(R_1d).assign(3*average_size)
 
-    # set horizontal diffusivity parameter
+    # set diffusivity and viscosity parameters
     options.horizontal_diffusivity = diffusivity
     options.horizontal_viscosity = viscosity_hydro
 
@@ -128,30 +135,40 @@ def forward(bathymetry_2d, viscosity_norm, ks_norm, average_size_norm, rhos_norm
 
     solver_obj.bnd_functions['shallow_water'] = swe_bnd
 
-    if sed_rate is not None:
-        solver_obj.bnd_functions['sediment'] = {
-            left_bnd_id: {'flux': Constant(-0.22), 'value': sed_rate},
-            right_bnd_id: {'elev': Constant(0.397)}}
-
-        # set initial conditions
-        solver_obj.assign_initial_conditions(uv=uv, elev=elev, sediment=sed_rate)
-    else:
-        solver_obj.bnd_functions['sediment'] = {
+    solver_obj.bnd_functions['sediment'] = {
             left_bnd_id: {'flux': Constant(-0.22), 'equilibrium': None},
             right_bnd_id: {'elev': Constant(0.397)}}
 
-        # set initial conditions
-        solver_obj.assign_initial_conditions(uv=uv, elev=elev)
+    # set initial conditions
+    solver_obj.assign_initial_conditions(uv=uv, elev=elev)
 
     # run model
     solver_obj.iterate()
 
     return solver_obj.fields.bathymetry_2d
 
-test_derivative = False
-taylor_test_flag = False
-minimize_flag = True
+# define mesh
+lx = 16
+ly = 1.1
+nx = lx*4
+ny = 5
+mesh2d = RectangleMesh(nx, ny, lx, ly)
 
+x, y = SpatialCoordinate(mesh2d)
+
+V = FunctionSpace(mesh2d, "CG", 1)
+
+# define bathymetry
+depth_riv = Constant(0.0)
+depth_trench = Constant(- 0.15)
+depth_diff = depth_trench - depth_riv
+
+trench = conditional(le(x, 5), depth_riv, conditional(le(x, 6.5), (1/1.5)*depth_diff*(x-6.5) + depth_trench,
+                         conditional(le(x, 9.5), depth_trench, conditional(le(x, 11), -(1/1.5)*depth_diff*(x-11) + depth_riv, depth_riv))))
+
+# set uncertain parameters and peturbed values for testing the derivative
+
+# Note these parameters are all scaled to help with convergence
 ks = Constant(0.025*100)
 ks_diff = Constant(0.025*100 + 1e-5)
 
@@ -166,20 +183,13 @@ diffusivity_diff = Constant(1.5 + 10**(-3))
 
 viscosity = Constant(1.0)
 
-if sed_flag:
-    sed_rate = Constant(0.3/(0.397*0.51*2650))
-    sed_rate2 = Constant(0.4/(0.397*0.51*2650))
-    sed_rate_diff = Constant(0.3/(0.397*0.51*2650) + 1e-6)
-else:
-    sed_rate = None
-    sed_rate2 = None
-
 bath1 = Function(V).interpolate(-trench)
 
-new_bath = forward(bath1, viscosity, ks, average_size, rhos, diffusivity, sed_rate)
+# run forward model so pyadjoint can tape it
+new_bath = forward(bath1, viscosity, ks, average_size, rhos, diffusivity)
 
+# calculate error between model bathymetry and experimental data
 form = 0
-
 for i in range(len(data)):
     bump_func = Function(V).project((1/0.01)*exp(-0.5*((x-data.iloc[i][0])/0.01)**2))
     normaliser = inner(bump_func, bump_func)*dx
@@ -188,6 +198,7 @@ for i in range(len(data)):
 J_init = assemble(form*1e3*dx)
 print(J_init)
 
+# use Tikhonov regularisation
 reg_param = 1e-4
 reg_param_diff = 5e-5
 print(reg_param)
@@ -196,31 +207,46 @@ reg_form = reg_param*(average_size*average_size*identity)
 reg_form += reg_param*(ks*ks*identity)
 reg_form += reg_param_diff*(diffusivity*diffusivity*identity)
 
+# assemble output functional
 J = J_init + assemble(reg_form*dx)
 print(J)
 
 if test_derivative:
+    # compute derivative of J with respect to uncertain parameter
+    # and also check derivative computed correctly by comparing (J_h - J_0) with dJ/dm * h. 
+    # For small enough h these should be equal
+    
+    # Tell pyadjoint what the functional and uncertain parameters are.
+    # If only want to calibrate for some of these parameters remove unnecessary parameters from control list
     rf = ReducedFunctional(J, [Control(p) for p in [rhos, average_size, ks, diffusivity]])
 
-    J_h = rf([rhos, average_size, ks, diffusivity])
-    print(J_h)
+    # replay tape. If J_0 is not equal to J (within a reasonable tolerance) then 
+    # pyadjoint has not taped the model correctly     
+    J_0 = rf([rhos, average_size, ks, diffusivity])
+    print(J_0)
 
+    # calculate derivative
     der = rf.derivative()
-
     der_sum = (der[0].dat.data[0]*1/1000) + (der[1].dat.data[0]*1e-3) + (der[2].dat.data[0]*1e-5) + (der[3].dat.data[0]*1e-3)
 
+    # play tape with slightly peturbed parameters
+    J_h = rf([rhos_diff, average_size_diff, ks_diff, diffusivity_diff])
+
+    # check (J_h - J_0) = dJ/dm * h within reasonable degree of tolerance
+    print(J_h - J_0)
     print(der_sum)
-
-    J_0 = rf([rhos_diff, average_size_diff, ks_diff, diffusivity_diff])
-
-    print(J_0 - J_h)
 
     f.close()
     stop
 
 
-if taylor_test_flag == True:
+if taylor_test_flag:
+    # check the taylor test passes
+    
+    # Tell pyadjoint what the functional and uncertain parameter are.
+    # If only want to calibrate for some of these parameters remove unnecessary parameters from control list
     rf = ReducedFunctional(J, [Control(p) for p in [rhos, average_size, ks, diffusivity]])
+    # peturbations used in taylor test
     h = [Constant(10/1000), Constant(5), Constant(100*0.002), Constant(5e-3*10)]
     print([i.dat.data[:] for i in h])
     conv_rate = taylor_test(rf, [rhos, average_size, ks, diffusivity], h)
@@ -234,7 +260,11 @@ if taylor_test_flag == True:
     stop
 
 if minimize_flag:
+    # Tell pyadjoint what the functional and uncertain parameter are.
+    # If only want to calibrate for some of these parameters remove unnecessary parameters from control list    
     rf = ReducedFunctional(J, [Control(p) for p in [rhos, average_size, ks, diffusivity]], eval_cb_post = eval_callback)
+    
+    # compute minimisation algorithm to calibrate for uncertain values    
     min_value = minimize(rf, options={'gtol':  1e-200, 'ftol': 1e-10, 'maxfun': 1000}, bounds = [[AdjFloat(1.5), AdjFloat(160e-2), AdjFloat(0.5), AdjFloat(0.0)], [AdjFloat(3), AdjFloat(250e-2), AdjFloat(5), AdjFloat(5)]])
 
     f.close()

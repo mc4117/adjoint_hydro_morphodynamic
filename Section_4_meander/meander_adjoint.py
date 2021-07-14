@@ -1,8 +1,26 @@
+"""
+Meander Test case - Adjoint
+=======================
+
+Uses the adjoint method to calculate the derivative of an output functional with respect to an 
+uncertain spatially-varying parameter.
+
+The forward model set-up for this test case can be found in 
+[1] Clare et al. (2020). Hydro-morphodynamics 2D modelling using a discontinuous Galerkin discretisation.
+    Computers & Geosciences, 104658. https://doi.org/10.1016/j.cageo.2020.104658
+"""
+
+# Note only one of the flags below should be set to True for each code-run.
+
+# derivative flag - if true compute the derivative (and test that it has been calculated correctly)
 test_derivative = False
+# taylor test flag - if true conduct the taylor test (another check to check derivative calculated correctly)
 taylor_test_flag = False
-jump_flag = False
+# perturb flag - if true then perturb uncertain parameter in the direction of derivative and compute difference
+#                between perturbed bathymetry and original bathymetry
 perturb = True
 
+# import required packages
 if not perturb:
     from firedrake_adjoint import *
 else:
@@ -17,10 +35,14 @@ import pylab as plt
 import time
 import datetime
 
+# choose which parameter is uncertain
 ks_flag = False
 d50_flag = True
 
 def forward(ks, rhos, average_size, mesh2d, V):
+"""
+This function runs the forward model simulation of the meander test case
+"""
 
     def update_forcings_bnd(t_new):
 
@@ -30,9 +52,9 @@ def forward(ks, rhos, average_size, mesh2d, V):
         gradient_elev2 = AdjFloat((-0.07342+0.02478)/(18000-6000))
         elev_init_const = AdjFloat(-0.062 + 0.05436)
 
+        # update flux and elevation boundary condition
         if t_new != float(t_old):
             t_old.assign(float(t_new))
-            # update boundary condtions
             if t_new*morfac <= 6000:
                 elev_constant.assign(gradient_elev*t_new*morfac + elev_init_const)
                 flux_constant.assign((gradient_flux*t_new*morfac) - 0.02)
@@ -70,7 +92,9 @@ def forward(ks, rhos, average_size, mesh2d, V):
     diff_bathy = Function(V).interpolate(Constant(0.0))
 
     if ks_flag:
-        # simulate initial hydrodynamics
+        # if uncertain parameter ks then must include initial hydrodynamics spin-up in the adjoint framework
+        # because the hydrodynamics depend on ks explicitly
+        
         # define initial elevation
         elev_init = Function(DG_2d).interpolate(0.0544 - bathymetry_2d)
         #  define initial velocity
@@ -113,13 +137,10 @@ def forward(ks, rhos, average_size, mesh2d, V):
         options.timestep = 1
 
         # set boundary conditions
-
         left_bnd_id = 1
         right_bnd_id = 2
 
         swe_bnd = {}
-
-        # set boundary conditions
         gradient_flux = AdjFloat((-0.053 + 0.02)/6000)
         gradient_flux2 = AdjFloat((-0.02+0.053)/(18000-6000))
         gradient_elev = AdjFloat((0.07342-0.02478)/6000)
@@ -139,6 +160,9 @@ def forward(ks, rhos, average_size, mesh2d, V):
 
         uv_hydro, elev = solver_obj.fields.solution_2d.split()
     else:
+        # if uncertain parameter is d50 can use the previous initial hydrodynamics spin-up 
+        # (created by meander_hydro.py) because the hydrodynamics do not explicitly depend on d50 
+        
         # initialise velocity and elevation
         chk = DumbCheckpoint("hydrodynamics_meander_fine/elevation", mode=FILE_READ)
         elev = Function(DG_2d, name="elevation")
@@ -150,21 +174,23 @@ def forward(ks, rhos, average_size, mesh2d, V):
         chk.load(uv_hydro)
         chk.close()
 
-    # choose directory to output results
+    # Now run full hydro-morphodynamic simulation
+    
     ts = time.time()
     st = datetime.datetime.fromtimestamp(ts).strftime('%Y-%m-%d %H:%M:%S')
     outputdir = 'outputs'+ st
 
+    # set parameters
     morfac = 50
     dt = 2
     end_time = 18000
-
     viscosity_hydro = Constant(5*10**(-2))
 
     # set up solver
     solver_obj = solver2d.FlowSolver2d(mesh2d, bathymetry_2d)
     options = solver_obj.options
 
+    # specify which components of sediment model are being used
     options.sediment_model_options.solve_suspended_sediment = False
     options.sediment_model_options.use_bedload = True
     options.sediment_model_options.solve_exner = True
@@ -265,44 +291,54 @@ x, y = SpatialCoordinate(mesh2d)
 # define function spaces
 V = FunctionSpace(mesh2d, 'CG', 1)
 
+# define parameters
+rhos = Constant(2650)
+
 ks = Function(V).interpolate(Constant(0.003))
 if ks_flag:
     ks_diff = Function(V).interpolate(Constant(0.003+3e-6))
 
-rhos = Constant(2650)
-
-x,y = SpatialCoordinate(mesh2d)
 average_size = Function(V).interpolate(conditional(y<-5, Constant(0.0), Constant(1e-3)))
 if d50_flag:
     average_size_diff = Function(V).interpolate(conditional(y<-5, Constant(0.0), Constant(1e-3+1e-6)))
 
+# run forward model
 bath, uv_old = forward(ks, rhos, average_size, mesh2d, V)
 
+# set up output functional ignoring the long inflow and outflow channels for simplicity 
+# and using a smoothing factor
 bath_constr = Function(V).project(conditional(y<1, Constant(0), bath))
-
 J = assemble(((inner(bath_constr,bath_constr)+Constant(1e-6))**0.5)*dx)
 
 print(J)
 
-old_inner_bath = Function(V).interpolate((inner(bath,bath)+Constant(1e-6))**0.5)
-
 if test_derivative:
+    # compute derivative of J with respect to uncertain parameter
+    # and also check derivative computed correctly by comparing (J_h - J_0) with dJ/dm * h. 
+    # For small enough h these should be equal
 
     if ks_flag:
+        # tell pyadjoint what the functional and uncertain parameter are
         rf = ReducedFunctional(J, Control(ks))
 
-        J_h = rf(ks)
-        print(J_h)
+        # replay tape. If J_0 is not equal to J (within a reasonable tolerance) then 
+        # pyadjoint has not taped the model correctly
+        J_0 = rf(ks)
+        print(J_0)
 
+        # calculate derivative
         der = rf.derivative()
         der_list = []
         for i in range(len(der.dat.data[:])):
             der_list.append(der.dat.data[i] * 3e-6)
-        J_0 = rf(ks_diff)
+        # play tape with slightly peturbed ks
+        J_h = rf(ks_diff)
 
+        # check (J_h - J_0) = dJ/dm * h within reasonable degree of tolerance
         print(sum(der_list))
-        print(J_0 - J_h)
+        print((J_h - J_0))
         
+        # save dJ/dm
         checkpoint_dir = "meander_der"
 
         if not os.path.exists(checkpoint_dir):
@@ -311,25 +347,35 @@ if test_derivative:
         chk.store(der, name="der")
         chk.close()        
         
+        # output dJ/dm for visualisation
         f = File('der_ks_fine.pvd')
         f.write(der)        
 
 
     elif d50_flag:
+        # tell pyadjoint what the functional and uncertain parameter are
         rf = ReducedFunctional(J, Control(average_size))
 
+        # replay tape. If J_0 is not equal to J (within a reasonable tolerance) then 
+        # pyadjoint has not taped the model correctly
+        J_0 = rf(average_size)
+        print(J_0)
+        
+        # calculate derivative        
         der = rf.derivative()
 
-
-        J_h = rf(average_size)
-        print(J_h)
-
-        J_0 = rf(average_size_diff)
+        # play tape with slightly peturbed d50
+        J_h = rf(average_size_diff)
 
         der_list = []
         for i in range(len(der.dat.data[:])):
             der_list.append(der.dat.data[i] * 1e-6)
             
+        # check (J_h - J_0) = dJ/dm * h within reasonable degree of tolerance
+        print(sum(der_list))
+        print(J_0 - J_h)            
+
+        # save dJ/dm
         checkpoint_dir = "meander_der"
 
         if not os.path.exists(checkpoint_dir):
@@ -338,99 +384,67 @@ if test_derivative:
         chk.store(der, name="der")
         chk.close()        
         
+        # output dJ/dm for visualisation
         f = File('der_d50_fine.pvd')
         f.write(der)        
-            
 
-        print(sum(der_list))
-        print(J_0 - J_h)
-
+    stop
 
 if taylor_test_flag:
+    # check that the taylor test passes for each uncertain parameter
     if ks_flag:
-        print('ks')
+        # tell pyadjoint what the functional and uncertain parameter are
         rf = ReducedFunctional(J, Control(ks))
+        # set peturbation in taylor test
         h = Function(V).project(Constant(0.25))
-        print(h.dat.data[:])
-        # corresponds to 0.003 + [2.5e-3, 1.25e-3, 6.25e-4, 3.125e-4]
+        # corresponds to taylor test values of 0.003 + [2.5e-3, 1.25e-3, 6.25e-4, 3.125e-4]
         conv_rate = taylor_test(rf, ks, h)
     elif d50_flag:
+        # tell pyadjoint what the functional and uncertain parameter are
         rf = ReducedFunctional(J, Control(average_size))
+        # set peturbation in taylor test
         h = Function(V).project(Constant(2e-3))
-        print(h.dat.data[:])
-        # corresponds to 1e-3 + [2e-5, 1e-5, 5e-6, 2.5e-6]
+        # corresponds to taylor test values of 1e-3 + [2e-5, 1e-5, 5e-6, 2.5e-6]
         conv_rate = taylor_test(rf, average_size, h)
 
     if conv_rate > 1.9:
         print('*** test passed ***')
     else:
         print('*** ERROR: test failed ***')
+        
+    stop
 
 
 if perturb:
+    # peturb the uncertain parameter by 1e-6 times the derivative
     if d50_flag:
+        # load in dJ/dm from the checkpoint created using the flag test_derivative = True
         chk = DumbCheckpoint("meander_der/der_d50_fine", mode=FILE_READ)
         der = Function(V, name="der")
         chk.load(der)
         chk.close()
 
+        # peturb d50 by derivative
         average_size_diff = Function(V).interpolate(average_size + (der*1e-6))
         new_bath, new_uv = forward(ks, rhos, average_size_diff, mesh2d, V)
         
+        # calculate difference between peturbed bed and unpeturbed bed and visualise
         diff = Function(V).interpolate(-new_bath+bath)
         f = File('diff_d50_fine.pvd')
         f.write(diff)
         
     elif ks_flag:
+        # load in dJ/dm from the checkpoint created using the flag test_derivative = True
         chk = DumbCheckpoint("meander_der/der_ks_fine", mode=FILE_READ)
         der = Function(V, name="der")
         chk.load(der)
         chk.close()
 
+        # peturb ks by derivative
         ks_diff = Function(V).interpolate(ks + (der*3e-6))
         new_bath, uv_new = forward(ks_diff, rhos, average_size, mesh2d, V)
         
+        # calculate difference between peturbed bed and unpeturbed bed and visualise
         diff = Function(V).interpolate(-new_bath+bath)
         f = File('diff_ks_fine.pvd')
         f.write(diff)
-        
-        vector_dg = VectorFunctionSpace(mesh2d, 'DG', 1)
-        diff_vel = Function(vector_dg).interpolate(uv_new-uv_old)
-
-        old_abs = Function(V).interpolate(sqrt(uv_old[0]**2 + uv_old[1]**2))
-        new_abs = Function(V).interpolate(sqrt(uv_new[0]**2 + uv_new[1]**2))
-        diff_mag = Function(V).interpolate(new_abs-old_abs)
-
-        f = File('diff_vel_ks_fine.pvd')
-        f.write(diff_vel)
-        f = File('diff_vel_mag_ks_fine.pvd')
-        f.write(diff_mag)
-
-
-def jump_d50(jump_val):
-    x,y = SpatialCoordinate(mesh2d)
-    average_size_diff = Function(V).interpolate(conditional(y<-5, Constant(0.0), Constant(1e-3 + jump_val)))
-    bath2, uv2 = forward(ks, rhos, average_size_diff, mesh2d, V)
-    new_inner_bath = Function(V).interpolate(inner(bath2, bath2))
-    return new_inner_bath, uv2
-
-def jump_ks(jump_val):
-    x,y = SpatialCoordinate(mesh2d)
-    ks_diff = Function(V).interpolate(Constant(0.003+jump_val))
-    bath2, uv2 = forward(ks_diff, rhos, average_size, mesh2d, V)
-    new_inner_bath = Function(V).interpolate(inner(bath2, bath2))
-    return new_inner_bath, uv2
-
-if jump_flag:
-    if ks_flag:
-        bath_list = []
-        bath_list.append(old_inner_bath)
-        for i in [2.5e-3, 1.25e-3, 6.25e-4, 3.125e-4]:
-            new_bath, new_uv = jump_ks(i)
-            bath_list.append(new_bath)
-    if d50_flag:
-        bath_list = []
-        bath_list.append(old_inner_bath)
-        for i in [2e-5, 1e-5, 5e-6, 2.5e-6]:
-            new_bath, new_uv = jump_d50(i)
-            bath_list.append(new_bath)

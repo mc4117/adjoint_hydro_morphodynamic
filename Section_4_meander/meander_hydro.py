@@ -1,3 +1,17 @@
+"""
+Meander Test case
+=======================
+Solves the initial hydrodynamics simulation of flow around a 180 degree bend replicating
+lab experiment 4 in Yen & Lee (1995).
+
+Note this is not the main run-file and is just used to create an initial checkpoint for
+the morphodynamic simulation.
+
+For more details of the test case set-up see
+[1] Clare et al. (2020). Hydro-morphodynamics 2D modelling using a discontinuous Galerkin discretisation.
+    Computers & Geosciences, 104658. https://doi.org/10.1016/j.cageo.2020.104658
+"""
+
 from thetis import *
 
 import numpy as np
@@ -57,10 +71,9 @@ bathymetry_straight = Function(V).interpolate(conditional(x <= 5,
                                               conditional(y <= 2.5, - gradient*abs(y - 2.5) + final, 0)))
 bathymetry_2d = Function(V).interpolate(-bathymetry_curve - bathymetry_straight)
 
-
-# simulate initial hydrodynamics
 # define initial elevation
 elev_init = Function(P1_2d).interpolate(0.0544 - bathymetry_2d)
+
 # define initial velocity
 uv_init = Function(vectorP1_2d).interpolate(as_vector((0.001,0.001)))
 
@@ -95,6 +108,7 @@ options.use_lax_friedrichs_tracer = False
 
 # using nikuradse friction
 options.nikuradse_bed_roughness = ksp
+
 # setting viscosity
 options.horizontal_viscosity = Constant(5*10**(-2))
 
@@ -106,16 +120,10 @@ if not hasattr(options.timestepper_options, 'use_automatic_timestep'):
     options.timestep = 1
 
 # set boundary conditions
-
 left_bnd_id = 1
 right_bnd_id = 2
 
 swe_bnd = {}
-
-gradient_flux = (-0.053 + 0.02)/6000
-gradient_flux2 = (-0.02+0.053)/(18000-6000)
-gradient_elev = (0.07342-0.02478)/6000
-gradient_elev2 = (-0.07342+0.02478)/(18000-6000)
 elev_init_const = (-0.062 + 0.05436)
 
 swe_bnd[3] = {'un': Constant(0.0)}
@@ -131,6 +139,7 @@ solver_obj.iterate()
 
 uv, elev = solver_obj.fields.solution_2d.split()
 
+# store hydrodynamics for next simulation
 checkpoint_dir = "hydrodynamics_meander_fine"
 
 if not os.path.exists(checkpoint_dir):
@@ -142,8 +151,3 @@ chk = DumbCheckpoint(checkpoint_dir + "/elevation", mode=FILE_CREATE)
 chk.store(elev, name="elevation")
 chk.close()
 
-elev_file = File(checkpoint_dir + '/elev.pvd')
-elev_file.write(elev)
-
-uv_file = File(checkpoint_dir + '/uv.pvd')
-uv_file.write(uv)
