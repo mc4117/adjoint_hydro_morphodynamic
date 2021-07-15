@@ -23,7 +23,8 @@ import matplotlib.pyplot as plt
 import time
 import datetime
 
-data = pd.read_csv('experimental_data.csv', header = None)
+directory = os.path.dirname(os.path.abspath(__file__)) + "/"
+data = pd.read_csv(directory + 'experimental_data.csv', header = None)
 
 # Note only one of the flags below should be set to True for each code-run.
 # The first two flags check that the adjoint model is working properly and the third flag runs the calibration

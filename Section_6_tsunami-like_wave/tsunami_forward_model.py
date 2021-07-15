@@ -13,10 +13,12 @@ import pylab as plt
 import pandas as pd
 import time
 import datetime
+import os
 
 import matplotlib
 font = {'size'   : 14}
 matplotlib.rc('font', **font)
+
 
 def tsunami_propagation(mesh2d, bathymetry_2d, uv, elev, sediment, dt, t_end, morfac, max_angle, init_flag = True, bedload_flag = False):
     
@@ -152,7 +154,8 @@ for i in range(2):
     bathlist = []
     for j in xaxis:
         bathlist.append(-bathymetry_2d.at([j, 1.2]))
-    test4_p = pd.read_csv('data_paper.csv', header = None)    
+    directory = os.path.dirname(os.path.abspath(__file__)) + "/"
+    test4_p = pd.read_csv(directory + 'data_paper.csv', header = None)
     plt.plot(xaxis-3.5, init_bathlist)
     plt.plot(xaxis-3.5, bathlist)
     plt.scatter(test4_p[0], test4_p[1])

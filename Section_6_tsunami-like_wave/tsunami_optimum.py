@@ -16,6 +16,7 @@ from thetis import *
 from thetis.configuration import *
 import numpy as np
 import pandas as pd
+import os
 import time
 import datetime
 
@@ -188,7 +189,8 @@ uv, elev, bath = forward(init, elev_guess, uv_init, elev_init, tval = 20)
 final_uv, final_elev, new_bath = forward(bath, elev_guess, uv_init2, elev_init2, tval = 20)
 
 # read in experimental data
-data = pd.read_csv('data_paper.csv', header = None)
+directory = os.path.dirname(os.path.abspath(__file__)) + "/"
+data = pd.read_csv(directory + 'data_paper.csv', header = None)
 
 # calculate error between model bathymetry and experimental data
 form = 0
