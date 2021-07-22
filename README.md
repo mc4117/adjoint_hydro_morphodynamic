@@ -22,7 +22,7 @@ Simulation scripts
 
 * Section 4: Meander Test Case
     
-    Reproduce tangent linear model results (Section 4) with:
+    Reproduce tangent linear model results (Section 4.1) with:
 ```
 #!bash
     $ python Section_4_meander/meander_tlm.py
@@ -31,7 +31,7 @@ Simulation scripts
     with test_derivative = True in that file. Note the visualisations created 
     by this script are Figure 3 in the paper.
 
-   Reproduce adjoint methods results (Section 4.1) with:
+   Reproduce adjoint methods results (Section 4.2) with:
 ```
 #!bash
     $ python Section_4_meander/meander_adjoint.py
