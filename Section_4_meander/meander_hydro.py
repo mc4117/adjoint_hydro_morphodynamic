@@ -52,8 +52,8 @@ mesh2d = snap_mesh_bnd_to_circle_arc(mesh2d, circle_arcs)
 x,y = SpatialCoordinate(mesh2d)
 
 # define function spaces
-V = FunctionSpace(mesh2d, 'CG', 1)
-P1_2d = FunctionSpace(mesh2d, 'DG', 1)
+V = get_functionspace(mesh2d, 'CG', 1)
+P1_2d = get_functionspace(mesh2d, 'DG', 1)
 vectorP1_2d = VectorFunctionSpace(mesh2d, 'DG', 1)
 
 # define underlying bathymetry

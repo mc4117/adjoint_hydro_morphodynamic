@@ -51,10 +51,10 @@ def forward(bathymetry_2d, viscosity_norm, ks_norm, average_size_norm, rhos_norm
     This function runs the forward model
     """
     # define function spaces
-    V = FunctionSpace(mesh2d, "CG", 1)
-    DG_2d = FunctionSpace(mesh2d, "DG", 1)
+    V = get_functionspace(mesh2d, "CG", 1)
+    DG_2d = get_functionspace(mesh2d, "DG", 1)
     vector_dg = VectorFunctionSpace(mesh2d, "DG", 1)
-    R_1d = FunctionSpace(mesh2d, 'R', 0)
+    R_1d = get_functionspace(mesh2d, 'R', 0)
 
     # re-scale uncertain parameters
     rhos = Function(R_1d).assign(rhos_norm*1000)
@@ -157,7 +157,7 @@ mesh2d = RectangleMesh(nx, ny, lx, ly)
 
 x, y = SpatialCoordinate(mesh2d)
 
-V = FunctionSpace(mesh2d, "CG", 1)
+V = get_functionspace(mesh2d, "CG", 1)
 
 # define bathymetry
 depth_riv = Constant(0.0)

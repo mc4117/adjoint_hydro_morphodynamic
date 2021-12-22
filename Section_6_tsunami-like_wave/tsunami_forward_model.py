@@ -36,7 +36,7 @@ def tsunami_propagation(mesh2d, bathymetry_2d, uv, elev, sediment, dt, t_end, mo
     x,y = th.SpatialCoordinate(mesh2d)
 
     # define function spaces
-    V = th.FunctionSpace(mesh2d, 'CG', 1)
+    V = th.get_functionspace(mesh2d, 'CG', 1)
 
     # initialise velocity and elevation
     elev_init = th.Function(V).interpolate(th.Constant(-0.0025))
@@ -81,7 +81,7 @@ def tsunami_propagation(mesh2d, bathymetry_2d, uv, elev, sediment, dt, t_end, mo
     options.sediment_model_options.average_sediment_size = th.Constant(1.8e-4)
     options.sediment_model_options.bed_reference_height = th.Constant(0.00054)
     options.sediment_model_options.use_sediment_slide = True
-    options.sediment_model_options.sed_slide_length_scale = th.Constant(0.2)
+    options.sediment_model_options.meshgrid_size = th.Constant(0.2)
     options.horizontal_diffusivity = th.Constant(1)
     options.sediment_model_options.morphological_viscosity = th.Constant(1e-6)
     options.sediment_model_options.max_angle = th.Constant(max_angle)
@@ -122,7 +122,7 @@ ny = np.int(ly*5)
 mesh2d = th.RectangleMesh(nx, ny, lx, ly)
 
 # define function spaces
-V = th.FunctionSpace(mesh2d, 'CG', 1)
+V = th.get_functionspace(mesh2d, 'CG', 1)
 
 # define underlying bathymetry
 init_bathymetry_2d = th.Function(V, name='Bathymetry')

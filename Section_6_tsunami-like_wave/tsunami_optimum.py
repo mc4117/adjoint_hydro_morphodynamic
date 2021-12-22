@@ -53,8 +53,8 @@ ny = np.int(ly*5)
 mesh2d = RectangleMesh(nx, ny, lx, ly)
 
 # define function spaces
-V = FunctionSpace(mesh2d, 'CG', 1)
-P1_2d = FunctionSpace(mesh2d, 'DG', 1)
+V = get_functionspace(mesh2d, 'CG', 1)
+P1_2d = get_functionspace(mesh2d, 'DG', 1)
 
 # define underlying bathymetry
 bathymetry_2d = Function(V, name='Bathymetry')
@@ -94,8 +94,8 @@ def forward(bathymetry, elev_list, uv_2d, elev_2d, tval):
     x,y = SpatialCoordinate(mesh2d)
 
     # define function spaces
-    V = FunctionSpace(mesh2d, 'CG', 1)
-    P1_2d = FunctionSpace(mesh2d, 'DG', 1)
+    V = get_functionspace(mesh2d, 'CG', 1)
+    P1_2d = get_functionspace(mesh2d, 'DG', 1)
 
     new_counter = [0]
     t_old = Constant(0.0)

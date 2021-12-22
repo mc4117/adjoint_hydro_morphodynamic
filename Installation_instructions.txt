@@ -1,0 +1,11 @@
+Installation instructions
+
+1. Download the installation script for firedrake using 
+	curl -O https://raw.githubusercontent.com/firedrakeproject/firedrake/master/scripts/firedrake-install
+2. Install firedrake using 
+	python3 firedrake-install --doi 10.5281/zenodo.5105703
+    to get the correct version. (For more details see https://www.firedrakeproject.org/download.html)
+3. Download the Thetis folder from the zenodo release so that it is in the src folder of your firedrake installation. 
+4. Activate the firedrake virtual environment and install Thetis using 
+           pip install -e <path-to-thetis-repository>
+5. Either switch the pyadjoint repository in your firedrake source file to point at the fork https://github.com/mc4117/pyadjoint or download pyadjoint from the zenodo release repeating the steps you did for Thetis

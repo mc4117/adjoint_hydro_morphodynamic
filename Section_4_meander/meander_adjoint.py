@@ -68,8 +68,8 @@ def forward(ks, rhos, average_size, mesh2d, V):
     x,y = SpatialCoordinate(mesh2d)
 
     # define function spaces
-    R_1d = FunctionSpace(mesh2d, 'R', 0)
-    DG_2d = FunctionSpace(mesh2d, 'DG', 1)
+    R_1d = get_functionspace(mesh2d, 'R', 0)
+    DG_2d = get_functionspace(mesh2d, 'DG', 1)
     vector_dg = VectorFunctionSpace(mesh2d, 'DG', 1)
 
 
@@ -289,7 +289,7 @@ mesh2d = snap_mesh_bnd_to_circle_arc(mesh2d, circle_arcs)
 
 x, y = SpatialCoordinate(mesh2d)
 # define function spaces
-V = FunctionSpace(mesh2d, 'CG', 1)
+V = get_functionspace(mesh2d, 'CG', 1)
 
 # define parameters
 rhos = Constant(2650)
