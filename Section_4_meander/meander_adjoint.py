@@ -40,9 +40,9 @@ ks_flag = False
 d50_flag = True
 
 def forward(ks, rhos, average_size, mesh2d, V):
-"""
-This function runs the forward model simulation of the meander test case
-"""
+    """
+    This function runs the forward model simulation of the meander test case
+    """
 
     def update_forcings_bnd(t_new):
 
